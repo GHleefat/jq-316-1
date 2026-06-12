@@ -1,13 +1,13 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { Booking, BookingStatus } from '@/types';
-import { mockBookings } from '@/utils/mockData';
-import { generateId } from '@/utils/calculations';
-import { nowISO, formatTime } from '@/utils/dateTime';
-import { calculateCost } from '@/utils/calculations';
-import { useWalletStore } from './useWalletStore';
-import { useParkingStore } from './useParkingStore';
-import { useUserStore } from './useUserStore';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { Booking, BookingStatus } from "@/types";
+import { mockBookings } from "@/utils/mockData";
+import { generateId } from "@/utils/calculations";
+import { nowISO, formatTime, doTimeRangesOverlap } from "@/utils/dateTime";
+import { calculateCost } from "@/utils/calculations";
+import { useWalletStore } from "./useWalletStore";
+import { useParkingStore } from "./useParkingStore";
+import { useUserStore } from "./useUserStore";
 
 interface BookingState {
   bookings: Booking[];
@@ -16,7 +16,7 @@ interface BookingState {
     date: string,
     startTime: string,
     endTime: string,
-    pricePerHour: number
+    pricePerHour: number,
   ) => Booking | null;
   updateBookingStatus: (id: string, status: BookingStatus) => void;
   confirmEndBooking: (id: string) => void;
@@ -24,6 +24,12 @@ interface BookingState {
   getBookingsByOwner: (ownerId: string) => Booking[];
   getBookingById: (id: string) => Booking | undefined;
   markReviewed: (bookingId: string, byRenter: boolean) => void;
+  getConflictingBookings: (
+    spotId: string,
+    date: string,
+    startTime: string,
+    endTime: string,
+  ) => Booking[];
 }
 
 export const useBookingStore = create<BookingState>()(
@@ -34,15 +40,30 @@ export const useBookingStore = create<BookingState>()(
       createBooking: (spotId, date, startTime, endTime, pricePerHour) => {
         const spot = useParkingStore.getState().getSpotById(spotId);
         const currentUser = useUserStore.getState().currentUser;
-        const wallet = useWalletStore.getState().getWalletByUserId(currentUser.id);
+        const wallet = useWalletStore
+          .getState()
+          .getWalletByUserId(currentUser.id);
 
         if (!spot || !wallet) return null;
 
         const totalCost = calculateCost(startTime, endTime, pricePerHour);
         if (wallet.balance < totalCost) return null;
 
+        const isAvailable = useParkingStore
+          .getState()
+          .isSpotAvailable(spotId, date, startTime, endTime);
+        if (!isAvailable) return null;
+
+        const conflicts = get().getConflictingBookings(
+          spotId,
+          date,
+          startTime,
+          endTime,
+        );
+        if (conflicts.length > 0) return null;
+
         const booking: Booking = {
-          id: generateId('booking-'),
+          id: generateId("booking-"),
           spotId,
           renterId: currentUser.id,
           ownerId: spot.ownerId,
@@ -50,7 +71,7 @@ export const useBookingStore = create<BookingState>()(
           startTime,
           endTime,
           totalCost,
-          status: 'pending',
+          status: "pending",
           createdAt: nowISO(),
           spotNumber: spot.spotNumber,
           building: spot.building,
@@ -64,14 +85,26 @@ export const useBookingStore = create<BookingState>()(
         return booking;
       },
 
+      getConflictingBookings: (spotId, date, startTime, endTime) => {
+        return get().bookings.filter(
+          (b) =>
+            b.spotId === spotId &&
+            b.date === date &&
+            (b.status === "pending" || b.status === "active") &&
+            doTimeRangesOverlap(b.startTime, b.endTime, startTime, endTime),
+        );
+      },
+
       updateBookingStatus: (id, status) =>
         set((state) => ({
-          bookings: state.bookings.map((b) => (b.id === id ? { ...b, status } : b)),
+          bookings: state.bookings.map((b) =>
+            b.id === id ? { ...b, status } : b,
+          ),
         })),
 
       confirmEndBooking: (id) => {
         const booking = get().getBookingById(id);
-        if (!booking || booking.status !== 'active') return;
+        if (!booking || booking.status !== "active") return;
 
         const actualEndTime = formatTime(new Date());
         const spot = useParkingStore.getState().getSpotById(booking.spotId);
@@ -79,16 +112,25 @@ export const useBookingStore = create<BookingState>()(
           ? calculateCost(booking.startTime, actualEndTime, spot.pricePerHour)
           : booking.totalCost;
 
-        useWalletStore.getState().processPayment(
-          booking.renterId,
-          booking.ownerId,
-          actualCost,
-          `车位${booking.spotNumber}停车费`
-        );
+        useWalletStore
+          .getState()
+          .processPayment(
+            booking.renterId,
+            booking.ownerId,
+            actualCost,
+            `车位${booking.spotNumber}停车费`,
+          );
 
         set((state) => ({
           bookings: state.bookings.map((b) =>
-            b.id === id ? { ...b, status: 'completed', actualEndTime, totalCost: actualCost } : b
+            b.id === id
+              ? {
+                  ...b,
+                  status: "completed",
+                  actualEndTime,
+                  totalCost: actualCost,
+                }
+              : b,
           ),
         }));
       },
@@ -108,10 +150,10 @@ export const useBookingStore = create<BookingState>()(
               ? byRenter
                 ? { ...b, reviewedByRenter: true }
                 : { ...b, reviewedByOwner: true }
-              : b
+              : b,
           ),
         })),
     }),
-    { name: 'booking-storage' }
-  )
+    { name: "booking-storage" },
+  ),
 );

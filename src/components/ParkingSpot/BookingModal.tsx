@@ -1,19 +1,27 @@
-import { useState, useMemo } from 'react';
-import { ParkingSpot } from '@/types';
-import Modal from '@/components/UI/Modal';
-import { MapPin, Clock, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useState, useMemo, useEffect } from "react";
+import { ParkingSpot, TimeSlot } from "@/types";
+import Modal from "@/components/UI/Modal";
+import {
+  MapPin,
+  Clock,
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+} from "lucide-react";
 import {
   formatDate,
   generateNextDays,
   formatDisplayDate,
   generateTimeSlots,
-} from '@/utils/dateTime';
-import { calculateCost } from '@/utils/calculations';
-import { calculateHours } from '@/utils/dateTime';
-import { useBookingStore } from '@/store/useBookingStore';
-import { useWalletStore } from '@/store/useWalletStore';
-import { useUserStore } from '@/store/useUserStore';
-import { useNavigate } from 'react-router-dom';
+  isTimeRangeWithin,
+} from "@/utils/dateTime";
+import { calculateCost } from "@/utils/calculations";
+import { calculateHours } from "@/utils/dateTime";
+import { useBookingStore } from "@/store/useBookingStore";
+import { useWalletStore } from "@/store/useWalletStore";
+import { useUserStore } from "@/store/useUserStore";
+import { useParkingStore } from "@/store/useParkingStore";
+import { useNavigate } from "react-router-dom";
 
 interface BookingModalProps {
   open: boolean;
@@ -21,27 +29,64 @@ interface BookingModalProps {
   spot: ParkingSpot | null;
 }
 
-export default function BookingModal({ open, onClose, spot }: BookingModalProps) {
+export default function BookingModal({
+  open,
+  onClose,
+  spot,
+}: BookingModalProps) {
   const today = formatDate(new Date());
   const nextDays = generateNextDays(7);
-  const timeSlots = generateTimeSlots();
+  const allTimeSlots = generateTimeSlots();
 
   const [date, setDate] = useState(today);
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
-  const [error, setError] = useState('');
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
   const { createBooking } = useBookingStore();
   const { getBalance } = useWalletStore();
   const { currentUser } = useUserStore();
+  const { isSpotAvailable, getOccupiedSlots } = useParkingStore();
   const navigate = useNavigate();
 
-  const availableSlots = useMemo(() => {
+  useEffect(() => {
+    if (!open) return;
+    setDate(today);
+    setStartTime("");
+    setEndTime("");
+    setError("");
+    setSuccess(false);
+  }, [open, today, spot?.id]);
+
+  const rentableSlots = useMemo<TimeSlot[]>(() => {
     if (!spot) return [];
     const dateData = spot.availableDates.find((d) => d.date === date);
     return dateData?.slots || [];
   }, [spot, date]);
+
+  const occupiedSlots = useMemo<TimeSlot[]>(() => {
+    if (!spot) return [];
+    return getOccupiedSlots(spot.id, date);
+  }, [spot, date, getOccupiedSlots]);
+
+  const availableStartTimes = useMemo(() => {
+    return allTimeSlots.filter((t) =>
+      rentableSlots.some(
+        (slot) =>
+          t >= slot.startTime &&
+          t < slot.endTime &&
+          !occupiedSlots.some((occ) => t >= occ.startTime && t < occ.endTime),
+      ),
+    );
+  }, [rentableSlots, occupiedSlots, allTimeSlots]);
+
+  const availableEndTimes = useMemo(() => {
+    if (!startTime) return [];
+    return allTimeSlots
+      .filter((t) => t > startTime)
+      .filter((t) => isSpotAvailable(spot?.id || "", date, startTime, t));
+  }, [startTime, spot?.id, date, isSpotAvailable, allTimeSlots]);
 
   const estimatedCost = useMemo(() => {
     if (!spot || !startTime || !endTime) return 0;
@@ -57,9 +102,9 @@ export default function BookingModal({ open, onClose, spot }: BookingModalProps)
 
   const resetForm = () => {
     setDate(today);
-    setStartTime('');
-    setEndTime('');
-    setError('');
+    setStartTime("");
+    setEndTime("");
+    setError("");
     setSuccess(false);
   };
 
@@ -70,7 +115,20 @@ export default function BookingModal({ open, onClose, spot }: BookingModalProps)
 
   const handleSubmit = () => {
     if (!spot || !date || !startTime || !endTime) {
-      setError('请选择完整的预约时间');
+      setError("请选择完整的预约时间");
+      return;
+    }
+
+    const fitsRentable = rentableSlots.some((slot) =>
+      isTimeRangeWithin(startTime, endTime, slot.startTime, slot.endTime),
+    );
+    if (!fitsRentable) {
+      setError("所选时段不在该车位的可租时段内，请重新选择。");
+      return;
+    }
+
+    if (!isSpotAvailable(spot.id, date, startTime, endTime)) {
+      setError("该时段已被其他邻居预约，请选择其他时间。");
       return;
     }
 
@@ -84,19 +142,19 @@ export default function BookingModal({ open, onClose, spot }: BookingModalProps)
       date,
       startTime,
       endTime,
-      spot.pricePerHour
+      spot.pricePerHour,
     );
 
     if (booking) {
       setSuccess(true);
     } else {
-      setError('预约失败，请重试');
+      setError("预约失败，时段可能已被占用，请刷新后重试。");
     }
   };
 
   const goToOrders = () => {
     handleClose();
-    navigate('/orders');
+    navigate("/orders");
   };
 
   if (!spot) return null;
@@ -138,7 +196,10 @@ export default function BookingModal({ open, onClose, spot }: BookingModalProps)
       ) : (
         <div className="space-y-4">
           <div className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl">
-            <MapPin size={20} className="text-primary-600 mt-0.5 flex-shrink-0" />
+            <MapPin
+              size={20}
+              className="text-primary-600 mt-0.5 flex-shrink-0"
+            />
             <div>
               <div className="font-semibold text-slate-800">
                 {spot.spotNumber}
@@ -158,13 +219,13 @@ export default function BookingModal({ open, onClose, spot }: BookingModalProps)
                   key={d}
                   onClick={() => {
                     setDate(d);
-                    setStartTime('');
-                    setEndTime('');
+                    setStartTime("");
+                    setEndTime("");
                   }}
                   className={`py-2 px-1 rounded-lg text-xs font-medium transition-all ${
                     date === d
-                      ? 'bg-primary-600 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      ? "bg-primary-600 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
                   {formatDisplayDate(d)}
@@ -173,60 +234,96 @@ export default function BookingModal({ open, onClose, spot }: BookingModalProps)
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">开始时间</label>
-              <select
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                className="input"
-              >
-                <option value="">请选择</option>
-                {timeSlots.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+          {rentableSlots.length === 0 ? (
+            <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg text-red-600 text-sm">
+              <XCircle size={18} />
+              该车位当日暂无可租时段，请选择其他日期。
             </div>
-            <div>
-              <label className="label">结束时间</label>
-              <select
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className="input"
-                disabled={!startTime}
-              >
-                <option value="">请选择</option>
-                {timeSlots
-                  .filter((t) => t > startTime)
-                  .map((t) => (
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">开始时间</label>
+                <select
+                  value={startTime}
+                  onChange={(e) => {
+                    setStartTime(e.target.value);
+                    setEndTime("");
+                  }}
+                  className="input"
+                >
+                  <option value="">请选择</option>
+                  {availableStartTimes.map((t) => (
                     <option key={t} value={t}>
                       {t}
                     </option>
                   ))}
-              </select>
-            </div>
-          </div>
-
-          {availableSlots.length > 0 && (
-            <div className="flex items-start gap-2 p-3 bg-primary-50 rounded-xl">
-              <Clock size={18} className="text-primary-600 mt-0.5 flex-shrink-0" />
+                </select>
+              </div>
               <div>
-                <div className="text-sm font-medium text-primary-800 mb-1">
-                  今日可租时段
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {availableSlots.map((slot, i) => (
-                    <span
-                      key={i}
-                      className="text-xs px-2 py-0.5 rounded bg-white text-primary-700"
-                    >
-                      {slot.startTime} - {slot.endTime}
-                    </span>
+                <label className="label">结束时间</label>
+                <select
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className="input"
+                  disabled={!startTime}
+                >
+                  <option value="">请选择</option>
+                  {availableEndTimes.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
                   ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {rentableSlots.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-start gap-2 p-3 bg-primary-50 rounded-xl">
+                <Clock
+                  size={18}
+                  className="text-primary-600 mt-0.5 flex-shrink-0"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-primary-800 mb-1">
+                    可租时段
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {rentableSlots.map((slot, i) => (
+                      <span
+                        key={i}
+                        className="text-xs px-2 py-0.5 rounded bg-white text-primary-700 border border-primary-200"
+                      >
+                        {slot.startTime} - {slot.endTime}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
+              {occupiedSlots.length > 0 && (
+                <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-xl">
+                  <AlertCircle
+                    size={18}
+                    className="text-amber-600 mt-0.5 flex-shrink-0"
+                  />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-amber-800 mb-1">
+                      已被预约
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {occupiedSlots.map((slot, i) => (
+                        <span
+                          key={i}
+                          className="text-xs px-2 py-0.5 rounded bg-white text-amber-700 border border-amber-200"
+                        >
+                          {slot.startTime} - {slot.endTime}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

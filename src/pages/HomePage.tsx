@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo } from "react";
 import {
   MapPin,
   Calendar,
@@ -6,30 +6,33 @@ import {
   ClipboardList,
   Wallet as WalletIcon,
   ParkingCircle,
-} from 'lucide-react';
-import { useParkingStore } from '@/store/useParkingStore';
-import { useBookingStore } from '@/store/useBookingStore';
-import { useWalletStore } from '@/store/useWalletStore';
-import { useUserStore } from '@/store/useUserStore';
-import { ParkingSpot, FilterOptions } from '@/types';
-import SpotCard from '@/components/ParkingSpot/SpotCard';
-import BookingModal from '@/components/ParkingSpot/BookingModal';
-import Empty from '@/components/UI/Empty';
+  Clock,
+} from "lucide-react";
+import { useParkingStore } from "@/store/useParkingStore";
+import { useBookingStore } from "@/store/useBookingStore";
+import { useWalletStore } from "@/store/useWalletStore";
+import { useUserStore } from "@/store/useUserStore";
+import { ParkingSpot, FilterOptions } from "@/types";
+import SpotCard from "@/components/ParkingSpot/SpotCard";
+import BookingModal from "@/components/ParkingSpot/BookingModal";
+import Empty from "@/components/UI/Empty";
 import {
   formatDate,
   generateNextDays,
   formatDisplayDate,
-} from '@/utils/dateTime';
-import { useNavigate } from 'react-router-dom';
+  generateTimeSlots,
+} from "@/utils/dateTime";
+import { useNavigate } from "react-router-dom";
 
 export default function HomePage() {
   const today = formatDate(new Date());
   const nextDays = generateNextDays(7);
+  const timeSlots = generateTimeSlots();
 
   const [filters, setFilters] = useState<FilterOptions>({
     date: today,
-    startTime: '',
-    endTime: '',
+    startTime: "",
+    endTime: "",
     minPrice: 0,
     maxPrice: 20,
   });
@@ -43,16 +46,18 @@ export default function HomePage() {
   const navigate = useNavigate();
 
   const filteredSpots = useMemo(() => {
-    if (currentUser.role === 'owner') {
+    if (currentUser.role === "owner") {
       return getSpotsByOwner(currentUser.id);
     }
     return filterSpots(filters);
   }, [filters, currentUser.role, spots]);
 
   const activeBookings =
-    currentUser.role === 'owner'
-      ? getBookingsByOwner(currentUser.id).filter((b) => b.status === 'active')
-      : getBookingsByRenter(currentUser.id).filter((b) => b.status === 'active');
+    currentUser.role === "owner"
+      ? getBookingsByOwner(currentUser.id).filter((b) => b.status === "active")
+      : getBookingsByRenter(currentUser.id).filter(
+          (b) => b.status === "active",
+        );
 
   const balance = getBalance(currentUser.id);
 
@@ -63,33 +68,33 @@ export default function HomePage() {
 
   const stats = [
     {
-      label: currentUser.role === 'owner' ? '我的车位' : '今日空闲车位',
+      label: currentUser.role === "owner" ? "我的车位" : "今日空闲车位",
       value:
-        currentUser.role === 'owner'
+        currentUser.role === "owner"
           ? getSpotsByOwner(currentUser.id).length
-          : spots.filter((s) => s.status === 'active').length,
+          : spots.filter((s) => s.status === "active").length,
       icon: ParkingCircle,
-      color: 'from-primary-500 to-primary-700',
+      color: "from-primary-500 to-primary-700",
     },
     {
-      label: '进行中订单',
+      label: "进行中订单",
       value: activeBookings.length,
       icon: ClipboardList,
-      color: 'from-accent-500 to-accent-700',
-      onClick: () => navigate('/orders'),
+      color: "from-accent-500 to-accent-700",
+      onClick: () => navigate("/orders"),
     },
     {
-      label: '账户余额',
+      label: "账户余额",
       value: `¥${balance.toFixed(2)}`,
       icon: WalletIcon,
-      color: 'from-slate-600 to-slate-800',
-      onClick: () => navigate('/wallet'),
+      color: "from-slate-600 to-slate-800",
+      onClick: () => navigate("/wallet"),
     },
   ];
 
   return (
     <div className="space-y-6">
-      {currentUser.role === 'renter' ? (
+      {currentUser.role === "renter" ? (
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 text-white p-6 md:p-8">
           <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-primary-500/20" />
           <div className="absolute -right-10 bottom-0 w-40 h-40 rounded-full bg-accent-500/20" />
@@ -97,50 +102,126 @@ export default function HomePage() {
             <h1 className="text-2xl md:text-3xl font-bold mb-2">
               找到合适的车位
             </h1>
-            <p className="text-primary-100 mb-6">
-              共享邻里车位，让停车更简单
-            </p>
-            <div className="bg-white/10 backdrop-blur rounded-xl p-4 flex flex-col md:flex-row gap-3">
-              <div className="flex items-center gap-2 flex-1">
-                <Calendar size={18} className="text-primary-200" />
-                <div className="flex flex-wrap gap-1 flex-1 overflow-x-auto scrollbar-thin">
-                  {nextDays.slice(0, 5).map((d) => (
-                    <button
-                      key={d}
-                      onClick={() =>
-                        setFilters((f) => ({ ...f, date: d }))
-                      }
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
-                        filters.date === d
-                          ? 'bg-white text-primary-700'
-                          : 'bg-white/10 text-white hover:bg-white/20'
-                      }`}
-                    >
-                      {formatDisplayDate(d)}
-                    </button>
-                  ))}
+            <p className="text-primary-100 mb-6">共享邻里车位，让停车更简单</p>
+            <div className="bg-white/10 backdrop-blur rounded-xl p-4 flex flex-col gap-3">
+              <div className="flex flex-col md:flex-row gap-3">
+                <div className="flex items-center gap-2 flex-1">
+                  <Calendar
+                    size={18}
+                    className="text-primary-200 flex-shrink-0"
+                  />
+                  <div className="flex flex-wrap gap-1 flex-1 overflow-x-auto scrollbar-thin">
+                    {nextDays.slice(0, 5).map((d) => (
+                      <button
+                        key={d}
+                        onClick={() =>
+                          setFilters((f) => ({
+                            ...f,
+                            date: d,
+                            startTime: "",
+                            endTime: "",
+                          }))
+                        }
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
+                          filters.date === d
+                            ? "bg-white text-primary-700"
+                            : "bg-white/10 text-white hover:bg-white/20"
+                        }`}
+                      >
+                        {formatDisplayDate(d)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="h-px md:h-auto md:w-px bg-white/20" />
+                <div className="flex items-center gap-2 flex-1">
+                  <Search
+                    size={18}
+                    className="text-primary-200 flex-shrink-0"
+                  />
+                  <input
+                    type="range"
+                    min={0}
+                    max={20}
+                    step={1}
+                    value={filters.maxPrice}
+                    onChange={(e) =>
+                      setFilters((f) => ({
+                        ...f,
+                        maxPrice: Number(e.target.value),
+                      }))
+                    }
+                    className="flex-1 accent-white"
+                  />
+                  <span className="text-sm font-medium whitespace-nowrap">
+                    ¥{filters.maxPrice}/时以内
+                  </span>
                 </div>
               </div>
-              <div className="h-px md:h-auto md:w-px bg-white/20" />
-              <div className="flex items-center gap-2 flex-1">
-                <Search size={18} className="text-primary-200" />
-                <input
-                  type="range"
-                  min={0}
-                  max={20}
-                  step={1}
-                  value={filters.maxPrice}
-                  onChange={(e) =>
-                    setFilters((f) => ({
-                      ...f,
-                      maxPrice: Number(e.target.value),
-                    }))
-                  }
-                  className="flex-1 accent-white"
-                />
-                <span className="text-sm font-medium whitespace-nowrap">
-                  ¥{filters.maxPrice}/时以内
-                </span>
+              <div className="h-px bg-white/20" />
+              <div className="flex flex-col md:flex-row gap-3 md:items-center">
+                <div className="flex items-center gap-2 flex-1 md:max-w-md">
+                  <Clock size={18} className="text-primary-200 flex-shrink-0" />
+                  <div className="grid grid-cols-2 gap-2 flex-1">
+                    <select
+                      value={filters.startTime}
+                      onChange={(e) =>
+                        setFilters((f) => ({
+                          ...f,
+                          startTime: e.target.value,
+                          endTime:
+                            f.endTime && e.target.value >= f.endTime
+                              ? ""
+                              : f.endTime,
+                        }))
+                      }
+                      className="w-full px-3 py-1.5 rounded-lg text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-white focus:bg-white/20 transition-all"
+                    >
+                      <option value="" className="text-slate-800">
+                        开始时间
+                      </option>
+                      {timeSlots.map((t) => (
+                        <option key={t} value={t} className="text-slate-800">
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={filters.endTime}
+                      onChange={(e) =>
+                        setFilters((f) => ({ ...f, endTime: e.target.value }))
+                      }
+                      disabled={!filters.startTime}
+                      className="w-full px-3 py-1.5 rounded-lg text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-white focus:bg-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="" className="text-slate-800">
+                        结束时间
+                      </option>
+                      {timeSlots
+                        .filter((t) => t > filters.startTime)
+                        .map((t) => (
+                          <option key={t} value={t} className="text-slate-800">
+                            {t}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+                {(filters.startTime || filters.endTime) && (
+                  <button
+                    onClick={() =>
+                      setFilters((f) => ({ ...f, startTime: "", endTime: "" }))
+                    }
+                    className="text-xs text-primary-200 hover:text-white underline underline-offset-2 self-end md:self-auto"
+                  >
+                    清除时间
+                  </button>
+                )}
+                <div className="text-xs text-primary-100 md:ml-auto">
+                  {filters.startTime && filters.endTime
+                    ? `已筛选 ${filters.startTime} ~ ${filters.endTime} 可用`
+                    : "提示：选择时间段精确筛选可用车位"}
+                </div>
               </div>
             </div>
           </div>
@@ -156,7 +237,7 @@ export default function HomePage() {
               闲置时段出租，轻松获得额外收入
             </p>
             <button
-              onClick={() => navigate('/publish')}
+              onClick={() => navigate("/publish")}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-accent-700 rounded-lg font-medium hover:bg-accent-50 transition-colors"
             >
               <MapPin size={18} />
@@ -173,7 +254,7 @@ export default function HomePage() {
             <div
               key={i}
               onClick={stat.onClick}
-              className={`card p-5 ${stat.onClick ? 'cursor-pointer' : ''}`}
+              className={`card p-5 ${stat.onClick ? "cursor-pointer" : ""}`}
             >
               <div className="flex items-center justify-between">
                 <div>
@@ -196,7 +277,7 @@ export default function HomePage() {
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-slate-800">
-            {currentUser.role === 'owner' ? '我的车位' : '可预约车位'}
+            {currentUser.role === "owner" ? "我的车位" : "可预约车位"}
           </h2>
           <span className="text-sm text-slate-500">
             共 {filteredSpots.length} 个
@@ -206,16 +287,20 @@ export default function HomePage() {
         {filteredSpots.length === 0 ? (
           <Empty
             icon={<ParkingCircle size={48} />}
-            title={currentUser.role === 'owner' ? '您还没有发布车位' : '暂无符合条件的车位'}
+            title={
+              currentUser.role === "owner"
+                ? "您还没有发布车位"
+                : "暂无符合条件的车位"
+            }
             description={
-              currentUser.role === 'owner'
-                ? '点击上方按钮发布您的第一个车位'
-                : '试试调整筛选条件'
+              currentUser.role === "owner"
+                ? "点击上方按钮发布您的第一个车位"
+                : "试试调整筛选条件"
             }
             action={
-              currentUser.role === 'owner' ? (
+              currentUser.role === "owner" ? (
                 <button
-                  onClick={() => navigate('/publish')}
+                  onClick={() => navigate("/publish")}
                   className="btn btn-primary"
                 >
                   发布车位
